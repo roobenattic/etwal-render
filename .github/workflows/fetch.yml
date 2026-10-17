@@ -1,0 +1,29 @@
+name: fetch
+run-name: "fetch ${{ inputs.label }}"
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        required: true
+      files:
+        description: "Base64 JSON list of {name, url} (short-lived signed URLs)"
+        required: true
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and attach to a release
+        env:
+          FILES_B64: ${{ inputs.files }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: preview-${{ inputs.label }}
+        run: |
+          mkdir out && cd out
+          echo "$FILES_B64" | base64 -d | python3 -c "import json,sys,urllib.request,shutil
+          for f in json.load(sys.stdin):
+              with urllib.request.urlopen(f['url'], timeout=300) as r, open(f['name'],'wb') as o: shutil.copyfileobj(r,o)
+              print('ok', f['name'])"
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create "$TAG" * --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "review copies" --prerelease

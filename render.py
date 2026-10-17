@@ -155,7 +155,15 @@ def render(spec):
             parts.append(f'{WORK}/c_{i}.mp4'); pdurs.append(cd)
             if cd < dur:
                 rest = dur - cd + 0.6
-                still_segment(img, rest, W, H, fps, i, f'{WORK}/s_{i}.mp4')
+                # continue from the clip's last frame so the framing does not jump
+                last = f'{WORK}/last_{i}.png'
+                try:
+                    sh(['ffmpeg', '-y', '-loglevel', 'error', '-sseof', '-0.1', '-i', f'{WORK}/c_{i}.mp4', '-frames:v', '1', '-update', '1', last])
+                    if os.path.getsize(last) > 1000:
+                        img = last
+                except Exception as e:
+                    print('last-frame grab failed, using still image:', e)
+                still_segment(img, rest, W, H, fps, 1, f'{WORK}/s_{i}.mp4')
                 parts.append(f'{WORK}/s_{i}.mp4'); pdurs.append(rest)
         else:
             still_segment(img, dur, W, H, fps, i, f'{WORK}/s_{i}.mp4')

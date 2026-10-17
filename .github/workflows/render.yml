@@ -1,0 +1,35 @@
+name: render
+run-name: "render ${{ inputs.label }}"
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Song / run label"
+        required: false
+        default: "manual"
+      spec:
+        description: "Base64 JSON spec built by n8n (EMM-04)"
+        required: true
+concurrency:
+  group: render-${{ inputs.label }}
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null && ffmpeg -version | head -1
+      - name: Fonts
+        run: |
+          mkdir -p fonts
+          curl -sSL -o fonts/Nunito.ttf "https://github.com/google/fonts/raw/main/ofl/nunito/Nunito%5Bwght%5D.ttf"
+          curl -sSL -o fonts/PlayfairDisplay.ttf "https://github.com/google/fonts/raw/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf"
+          mkdir -p ~/.fonts && cp fonts/*.ttf ~/.fonts/ && fc-cache -f > /dev/null
+      - name: Render
+        env:
+          SPEC_B64: ${{ inputs.spec }}
+          FONT_DIR: fonts
+          WORK: work
+        run: python3 render.py

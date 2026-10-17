@@ -192,7 +192,8 @@ def render(spec):
         afilt.append(f"afade=t=in:st=0:d={a['fade_in']}")
     if fade_out:
         afilt.append(f"afade=t=out:st={max(0, total - fade_out):.3f}:d={fade_out}")
-    vfin = f"fade=t=in:st=0:d=1.2,fade=t=out:st={max(0, total - 2.5):.3f}:d=2.5"
+    fo = 0.8 if H > W else 2.5   # Shorts: keep the end CTA readable
+    vfin = f"fade=t=in:st=0:d=1.2,fade=t=out:st={max(0, total - fo):.3f}:d={fo}"
     fc = (f"[0:v]trim=duration={total:.3f},setpts=PTS-STARTPTS[b];[b][2:v]overlay=0:0[g];"
           f"[g]ass={ass}:fontsdir={FONT_DIR},{vfin}[v];[1:a]{','.join(afilt)}[a]")
     out = spec.get('output', f'{WORK}/out.mp4')

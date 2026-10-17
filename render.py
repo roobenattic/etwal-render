@@ -115,6 +115,23 @@ def clip_segment(clip, dur, W, H, fps, out):
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', out])
 
 
+def loop_segment(clip, dur, W, H, fps, out):
+    """Fill `dur` seconds with continuous motion: play the clip forward, then backward (ping-pong), repeat."""
+    base = out + '.fwd.mp4'
+    vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},format=yuv420p"
+    sh(['ffmpeg', '-y', '-loglevel', 'error', '-i', clip, '-an', '-vf', vf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', base])
+    rev = out + '.rev.mp4'
+    sh(['ffmpeg', '-y', '-loglevel', 'error', '-i', base, '-vf', 'reverse', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', rev])
+    cd = probe_duration(base)
+    n = max(1, math.ceil(dur / max(cd, 0.5)))
+    lst = out + '.txt'
+    with open(lst, 'w') as f:
+        for k in range(n + 1):
+            f.write(f"file '{os.path.abspath(base if k % 2 == 0 else rev)}'\n")
+    sh(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', lst, '-t', f'{dur:.3f}',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-r', str(fps), out])
+
+
 def xfade_concat(segs, durs, X, out, fps):
     """Concatenate segments with crossfades of X seconds (each seg already includes its overlap)."""
     if len(segs) == 1:
@@ -148,23 +165,8 @@ def render(spec):
         parts, pdurs = [], []
         if sl.get('clip'):
             clip = fetch(sl['clip'], f'{WORK}/clip_{i}.mp4')
-            cd = min(probe_duration(clip), dur)
-            if dur - cd < 1.5:      # clip covers (almost) the whole slot
-                cd = dur
-            clip_segment(clip, cd, W, H, fps, f'{WORK}/c_{i}.mp4')
-            parts.append(f'{WORK}/c_{i}.mp4'); pdurs.append(cd)
-            if cd < dur:
-                rest = dur - cd + 0.6
-                # continue from the clip's last frame so the framing does not jump
-                last = f'{WORK}/last_{i}.png'
-                try:
-                    sh(['ffmpeg', '-y', '-loglevel', 'error', '-sseof', '-0.1', '-i', f'{WORK}/c_{i}.mp4', '-frames:v', '1', '-update', '1', last])
-                    if os.path.getsize(last) > 1000:
-                        img = last
-                except Exception as e:
-                    print('last-frame grab failed, using still image:', e)
-                still_segment(img, rest, W, H, fps, 0, f'{WORK}/s_{i}.mp4')
-                parts.append(f'{WORK}/s_{i}.mp4'); pdurs.append(rest)
+            loop_segment(clip, dur, W, H, fps, f'{WORK}/c_{i}.mp4')
+            parts.append(f'{WORK}/c_{i}.mp4'); pdurs.append(dur)
         else:
             still_segment(img, dur, W, H, fps, i, f'{WORK}/s_{i}.mp4')
             parts.append(f'{WORK}/s_{i}.mp4'); pdurs.append(dur)

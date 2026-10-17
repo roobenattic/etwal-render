@@ -193,9 +193,37 @@ def render(spec):
     return out, probe_duration(out)
 
 
+MAX_UPLOAD = int(os.environ.get('MAX_UPLOAD_BYTES', str(48 * 1024 * 1024)))
+
+
+def preview_copy(src, dur, dest):
+    """Re-encode to fit the Supabase per-file limit (review copy). The full-quality master goes to a GitHub release."""
+    if os.path.getsize(src) <= MAX_UPLOAD:
+        shutil.copy(src, dest)
+        return dest
+    kbps = max(400, int((MAX_UPLOAD * 8 / 1000) / max(dur, 1) * 0.86) - 128)
+    sh(['ffmpeg', '-y', '-loglevel', 'error', '-i', src, '-c:v', 'libx264', '-preset', 'medium', '-b:v', f'{kbps}k',
+        '-maxrate', f'{int(kbps*1.4)}k', '-bufsize', f'{kbps*2}k', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart', dest])
+    return dest
+
+
 def upload(path, url):
-    sh(['curl', '-sS', '--fail-with-body', '-X', 'PUT', '-H', 'Content-Type: video/mp4', '-H', 'x-upsert: true',
-        '--data-binary', f'@{path}', url])
+    r = subprocess.run(['curl', '-sS', '-w', '\\n%{http_code}', '-X', 'PUT', '-H', 'Content-Type: video/mp4', '-H', 'x-upsert: true',
+                        '--data-binary', f'@{path}', url], capture_output=True, text=True)
+    code = (r.stdout.strip().splitlines() or ['0'])[-1]
+    if not code.startswith('2'):
+        raise RuntimeError(f'upload HTTP {code}: {r.stdout[-300:]} {r.stderr[-200:]} size={os.path.getsize(path)}')
+
+
+def release_masters(tag, files):
+    """Attach full-quality masters to a GitHub release in this (private) repo."""
+    repo = os.environ.get('GITHUB_REPOSITORY')
+    if not repo or not files:
+        return None
+    subprocess.run(['gh', 'release', 'delete', tag, '--repo', repo, '--yes', '--cleanup-tag'], capture_output=True)
+    sh(['gh', 'release', 'create', tag, *files, '--repo', repo, '--title', tag, '--notes', 'Etwal Matinal Mizik render masters'])
+    return tag
 
 
 def callback(url, payload):
@@ -218,18 +246,32 @@ def main():
         meta, jobs = jobs, jobs['jobs']
     else:
         meta, jobs = {}, (jobs if isinstance(jobs, list) else [jobs])
-    results = []
+    results, masters = [], []
+    os.makedirs('masters', exist_ok=True)
     for job in jobs:
         global WORK
-        WORK = os.path.join(os.environ.get('WORK', 'work'), job.get('kind', 'video'))
+        kind = job.get('kind', 'video')
+        WORK = os.path.join(os.environ.get('WORK', 'work'), kind)
         try:
             out, dur = render(job)
+            master = os.path.join('masters', f'{kind}.mp4')
+            shutil.copy(out, master)
+            masters.append(master)
+            prev = preview_copy(out, dur, os.path.join(WORK, 'preview.mp4'))
             if job.get('upload_url'):
-                upload(out, job['upload_url'])
-            results.append({'kind': job.get('kind'), 'path': job.get('upload_path'), 'duration': round(dur, 2), 'expect': job['duration'], 'status': 'done'})
+                upload(prev, job['upload_url'])
+            results.append({'kind': kind, 'path': job.get('upload_path'), 'duration': round(dur, 2), 'expect': job['duration'],
+                             'status': 'done', 'master_bytes': os.path.getsize(master), 'preview_bytes': os.path.getsize(prev),
+                             'master_asset': f'{kind}.mp4'})
         except Exception as e:
-            results.append({'kind': job.get('kind'), 'status': 'error', 'error': str(e)[:500]})
-    payload = {'song_id': meta.get('song_id'), 'run_ref': meta.get('run_ref'), 'gh_run': os.environ.get('GITHUB_RUN_ID'), 'results': results}
+            results.append({'kind': kind, 'status': 'error', 'error': str(e)[:700]})
+    tag = None
+    try:
+        label = meta.get('label') or f"{meta.get('song_id', 'song')}-{meta.get('run_ref', 'run')}"
+        tag = release_masters(label, masters)
+    except Exception as e:
+        print('release failed:', e)
+    payload = {'song_id': meta.get('song_id'), 'run_ref': meta.get('run_ref'), 'gh_run': os.environ.get('GITHUB_RUN_ID'), 'release': tag, 'results': results}
     print(json.dumps(payload, indent=1))
     callback(meta.get('callback_url'), payload)
     if any(r['status'] != 'done' for r in results):

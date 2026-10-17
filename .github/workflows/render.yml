@@ -10,6 +10,8 @@ on:
       spec:
         description: "Base64 JSON spec built by n8n (EMM-04)"
         required: true
+permissions:
+  contents: write
 concurrency:
   group: render-${{ inputs.label }}
   cancel-in-progress: false
@@ -31,5 +33,6 @@ jobs:
         env:
           SPEC_B64: ${{ inputs.spec }}
           FONT_DIR: fonts
+          GH_TOKEN: ${{ github.token }}
           WORK: work
         run: python3 render.py

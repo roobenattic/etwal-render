@@ -163,7 +163,7 @@ def render(spec):
                         img = last
                 except Exception as e:
                     print('last-frame grab failed, using still image:', e)
-                still_segment(img, rest, W, H, fps, 1, f'{WORK}/s_{i}.mp4')
+                still_segment(img, rest, W, H, fps, 0, f'{WORK}/s_{i}.mp4')
                 parts.append(f'{WORK}/s_{i}.mp4'); pdurs.append(rest)
         else:
             still_segment(img, dur, W, H, fps, i, f'{WORK}/s_{i}.mp4')
